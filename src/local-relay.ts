@@ -35,6 +35,8 @@ export async function startLocalWalletConnectRelay(
   const virtualSubscriptions = new Map<string, Set<WebSocket>>();
 
   server.on("connection", (socket) => {
+    debugRelay("connection", "open", { clients: server.clients.size });
+
     socket.on("message", (raw) => {
       const request = parseRelayRequest(raw);
       if (!request?.method) return;
@@ -50,6 +52,7 @@ export async function startLocalWalletConnectRelay(
     });
 
     socket.on("close", () => {
+      debugRelay("connection", "close", { clients: server.clients.size });
       for (const [topic, entries] of subscriptions) {
         const active = entries.filter((entry) => entry.socket !== socket);
         if (active.length) subscriptions.set(topic, active);
