@@ -16,8 +16,10 @@ interface RelaySubscription {
 }
 
 interface RelayMessage {
+  attestation?: string | null;
   message: unknown;
   publishedAt: number;
+  tag?: number;
   topic: string;
 }
 
@@ -138,22 +140,24 @@ function handleRelayRequest(
 
   if (method.endsWith("_batchSubscribe")) {
     const topics = readTopics(request);
+    const ids: string[] = [];
     for (const topic of topics) {
       const id = randomUUID();
+      ids.push(id);
       const entries = subscriptions.get(topic) ?? [];
       const subscription = { id, socket, topic };
       entries.push(subscription);
       subscriptions.set(topic, entries);
       replayTopicMessages(subscription, messages.get(topic) ?? []);
     }
-    sendResult(socket, request, true);
+    sendResult(socket, request, ids);
     return;
   }
 
   if (method.endsWith("_publish")) {
     const topic = readTopic(request);
     const message = request.params?.message;
-    storeRelayMessage(topic, message, messages);
+    storeRelayMessage(topic, message, messages, readRelayMessageMetadata(request.params));
     sendResult(socket, request, true);
     publishToSubscribers(topic, message, subscriptions, virtualSubscriptions, socket);
     return;
@@ -168,7 +172,7 @@ function handleRelayRequest(
 
   if (method.endsWith("_unsubscribe")) {
     const topic = readTopic(request);
-    const id = String(request.params?.id ?? "");
+    const id = String(request.params?.id ?? request.params?.subscriptionId ?? "");
     const entries = subscriptions.get(topic) ?? [];
     subscriptions.set(
       topic,
@@ -196,7 +200,7 @@ function handleCustomWalletConnectRequest(
 
     proposers.set(topic, socket);
     addVirtualSubscription(virtualSubscriptions, topic, socket);
-    storeRelayMessage(topic, message, messages);
+    storeRelayMessage(topic, message, messages, readRelayMessageMetadata(request.params));
     sendResult(socket, request, true);
     publishToSubscribers(topic, message, subscriptions, virtualSubscriptions, socket);
     return true;
@@ -304,10 +308,17 @@ function readStringParam(
 function storeRelayMessage(
   topic: string,
   message: unknown,
-  messages: Map<string, RelayMessage[]>
+  messages: Map<string, RelayMessage[]>,
+  metadata: Pick<RelayMessage, "attestation" | "tag"> = {}
 ): void {
   const topicMessages = messages.get(topic) ?? [];
-  topicMessages.push({ message, publishedAt: Date.now(), topic });
+  topicMessages.push({
+    attestation: metadata.attestation,
+    message,
+    publishedAt: Date.now(),
+    tag: metadata.tag,
+    topic,
+  });
   messages.set(topic, topicMessages.slice(-100));
 }
 
@@ -352,13 +363,22 @@ function sendRelayMessage(
   subscription: RelaySubscription,
   message: RelayMessage
 ): void {
+  const subscriptionData = {
+    attestation: message.attestation ?? null,
+    message: message.message,
+    publishedAt: message.publishedAt,
+    tag: message.tag ?? 0,
+    topic: message.topic,
+  };
   send(subscription.socket, {
     id: Date.now(),
     jsonrpc: "2.0",
     method: "irn_subscription",
     params: {
-      data: message,
+      data: subscriptionData,
       id: subscription.id,
+      subscriptionData,
+      subscriptionId: subscription.id,
     },
   });
 }
@@ -411,6 +431,17 @@ function send(socket: WebSocket, payload: unknown): void {
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(payload));
   }
+}
+
+function readRelayMessageMetadata(
+  params: Record<string, unknown> | undefined
+): Pick<RelayMessage, "attestation" | "tag"> {
+  const tag = params?.tag;
+  const attestation = params?.attestation;
+  return {
+    attestation: typeof attestation === "string" ? attestation : null,
+    tag: typeof tag === "number" ? tag : undefined,
+  };
 }
 
 function parseRelayRequest(raw: RawData): RelayRequest | null {

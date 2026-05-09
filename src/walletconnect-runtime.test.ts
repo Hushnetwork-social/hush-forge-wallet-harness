@@ -173,9 +173,83 @@ describe("walletconnect harness runtime", () => {
       params: {
         data: {
           message: "approved",
+          tag: 0,
           topic: pairingTopic,
         },
         id: subscriptionId,
+        subscriptionData: {
+          message: "approved",
+          tag: 0,
+          topic: pairingTopic,
+        },
+        subscriptionId,
+      },
+    });
+
+    dapp.close();
+    wallet.close();
+  });
+
+  it("uses the Android Reown relay shape for batch subscriptions", async () => {
+    relay = await startLocalWalletConnectRelay(0);
+    const dapp = new WebSocket(relay.url);
+    const wallet = new WebSocket(relay.url);
+    await Promise.all([waitForSocketOpen(dapp), waitForSocketOpen(wallet)]);
+
+    const pairingTopic = "android-pairing-topic";
+    const subscribePromise = waitForSocketMessage(dapp);
+    dapp.send(
+      JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "irn_batchSubscribe",
+        params: { topics: [pairingTopic] },
+      })
+    );
+
+    const subscriptionIds = JSON.parse(await subscribePromise).result;
+    expect(subscriptionIds).toEqual([expect.any(String)]);
+
+    const proposePromise = waitForSocketMessage(dapp);
+    dapp.send(
+      JSON.stringify({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "wc_proposeSession",
+        params: {
+          pairingTopic,
+          sessionProposal: "proposal",
+        },
+      })
+    );
+    expect(JSON.parse(await proposePromise)).toMatchObject({ result: true });
+
+    const approvalPromise = waitForSocketMessage(dapp);
+    wallet.send(
+      JSON.stringify({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "wc_approveSession",
+        params: {
+          pairingTopic,
+          sessionProposalResponse: "approved",
+          sessionSettlementRequest: "settled",
+          sessionTopic: "session-topic",
+        },
+      })
+    );
+
+    const approval = JSON.parse(await approvalPromise);
+    expect(approval).toMatchObject({
+      method: "irn_subscription",
+      params: {
+        subscriptionData: {
+          message: "approved",
+          publishedAt: expect.any(Number),
+          tag: 0,
+          topic: pairingTopic,
+        },
+        subscriptionId: subscriptionIds[0],
       },
     });
 
