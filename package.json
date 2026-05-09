@@ -1,0 +1,46 @@
+{
+  "name": "@hushnetwork/forge-wallet-harness",
+  "version": "0.1.0",
+  "description": "WalletConnect-compatible local wallet harness for FORGE CI and mobile smoke tests.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "forge-wallet-harness": "./dist/dev-server.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./dev-server": {
+      "types": "./dist/dev-server.d.ts",
+      "default": "./dist/dev-server.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev:server": "tsx src/dev-server.ts",
+    "prepare": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cityofzion/neon-js": "5.9.0",
+    "@reown/walletkit": "1.5.5",
+    "@walletconnect/core": "2.23.9",
+    "@walletconnect/jsonrpc-utils": "1.0.8",
+    "ws": "8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.25",
+    "@types/ws": "8.18.1",
+    "@walletconnect/universal-provider": "2.23.9",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
