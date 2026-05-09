@@ -46,7 +46,17 @@ async function main(): Promise<void> {
   });
 
   const server = createServer((request, response) => {
-    void handleRequest(request, response, runtime, harnessConfig, relay.url);
+    void handleRequest(request, response, runtime, harnessConfig, relay.url).catch(
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[forge-wallet-harness] request failed:", message);
+        if (!response.headersSent) {
+          writeJson(response, 500, { error: message });
+          return;
+        }
+        response.end();
+      }
+    );
   });
 
   await new Promise<void>((resolve) => server.listen(pairPort, resolve));
@@ -102,11 +112,17 @@ async function handleRequest(
   if (request.method === "POST" && request.url === "/pair") {
     const body = (await readJsonBody(request)) as { uri?: unknown };
     if (typeof body.uri !== "string" || !body.uri.startsWith("wc:")) {
+      console.warn("[forge-wallet-harness] rejected invalid pair request");
       writeJson(response, 400, { error: "Missing WalletConnect URI." });
       return;
     }
 
+    console.log(
+      "[forge-wallet-harness] pair request:",
+      redactWalletConnectUri(body.uri)
+    );
     await runtime.pair(body.uri);
+    console.log("[forge-wallet-harness] pair request accepted");
     writeJson(response, 200, { ok: true });
     return;
   }
@@ -159,4 +175,8 @@ function readPort(value: string | undefined, fallback: number): number {
     throw new Error(`Invalid port: ${value}`);
   }
   return parsed;
+}
+
+function redactWalletConnectUri(uri: string): string {
+  return `${uri.split("?")[0]?.slice(0, 32) ?? "wc:"}...(${uri.length} chars)`;
 }
