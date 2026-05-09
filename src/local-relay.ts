@@ -3,6 +3,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 interface RelayRequest {
   id?: number | string;
+  idRaw?: string;
   jsonrpc?: "2.0";
   method?: string;
   params?: Record<string, unknown>;
@@ -113,7 +114,7 @@ function handleRelayRequest(
   const customMessage = readCustomWalletConnectMessage(request);
   if (customMessage) {
     storeRelayMessage(customMessage.topic, customMessage.message, messages);
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
     publishToSubscribers(
       customMessage.topic,
       customMessage.message,
@@ -130,7 +131,7 @@ function handleRelayRequest(
     const entries = subscriptions.get(topic) ?? [];
     entries.push({ id, socket, topic });
     subscriptions.set(topic, entries);
-    sendResult(socket, request.id, id);
+    sendResult(socket, request, id);
     replayTopicMessages({ id, socket, topic }, messages.get(topic) ?? []);
     return;
   }
@@ -145,7 +146,7 @@ function handleRelayRequest(
       subscriptions.set(topic, entries);
       replayTopicMessages(subscription, messages.get(topic) ?? []);
     }
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
     return;
   }
 
@@ -153,13 +154,13 @@ function handleRelayRequest(
     const topic = readTopic(request);
     const message = request.params?.message;
     storeRelayMessage(topic, message, messages);
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
     publishToSubscribers(topic, message, subscriptions, virtualSubscriptions, socket);
     return;
   }
 
   if (method.endsWith("_batchFetchMessages")) {
-    sendResult(socket, request.id, {
+    sendResult(socket, request, {
       messages: readTopics(request).flatMap((topic) => messages.get(topic) ?? []),
     });
     return;
@@ -173,11 +174,11 @@ function handleRelayRequest(
       topic,
       entries.filter((entry) => entry.id !== id)
     );
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
     return;
   }
 
-  sendResult(socket, request.id, true);
+  sendResult(socket, request, true);
 }
 
 function handleCustomWalletConnectRequest(
@@ -196,7 +197,7 @@ function handleCustomWalletConnectRequest(
     proposers.set(topic, socket);
     addVirtualSubscription(virtualSubscriptions, topic, socket);
     storeRelayMessage(topic, message, messages);
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
     publishToSubscribers(topic, message, subscriptions, virtualSubscriptions, socket);
     return true;
   }
@@ -218,7 +219,7 @@ function handleCustomWalletConnectRequest(
 
     storeRelayMessage(sessionTopic, sessionSettlement, messages);
     addVirtualSubscription(virtualSubscriptions, sessionTopic, socket);
-    sendResult(socket, request.id, true);
+    sendResult(socket, request, true);
 
     const proposer = proposers.get(pairingTopic);
     if (proposer) {
@@ -374,14 +375,24 @@ function readTopics(request: RelayRequest): string[] {
 
 function sendResult(
   socket: WebSocket,
+  request: RelayRequest,
+  result: unknown
+): void {
+  sendJsonRpcResult(socket, request.idRaw, request.id, result);
+}
+
+function sendJsonRpcResult(
+  socket: WebSocket,
+  idRaw: string | undefined,
   id: RelayRequest["id"],
   result: unknown
 ): void {
-  send(socket, {
-    id,
-    jsonrpc: "2.0",
-    result,
-  });
+  if (socket.readyState !== WebSocket.OPEN) return;
+
+  const safeId = idRaw ?? JSON.stringify(id ?? null);
+  socket.send(
+    `{"id":${safeId},"jsonrpc":"2.0","result":${JSON.stringify(result)}}`
+  );
 }
 
 function send(socket: WebSocket, payload: unknown): void {
@@ -391,10 +402,17 @@ function send(socket: WebSocket, payload: unknown): void {
 }
 
 function parseRelayRequest(raw: RawData): RelayRequest | null {
+  const text = raw.toString();
   try {
-    const payload = JSON.parse(raw.toString()) as RelayRequest;
-    return payload && typeof payload === "object" ? payload : null;
+    const payload = JSON.parse(text) as RelayRequest;
+    return payload && typeof payload === "object"
+      ? { ...payload, idRaw: readRawJsonRpcId(text) }
+      : null;
   } catch {
     return null;
   }
+}
+
+function readRawJsonRpcId(text: string): string | undefined {
+  return text.match(/"id"\s*:\s*("([^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|null)/)?.[1];
 }

@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import UniversalProvider from "@walletconnect/universal-provider";
+import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadForgeWalletHarnessConfig } from "./config.js";
 import {
@@ -97,4 +98,39 @@ describe("walletconnect harness runtime", () => {
       }),
     ]);
   }, 30_000);
+
+  it("preserves large Android JSON-RPC ids in relay acknowledgements", async () => {
+    relay = await startLocalWalletConnectRelay(0);
+    const socket = new WebSocket(relay.url);
+    await waitForSocketOpen(socket);
+
+    const androidStyleId = "1778341964282845123";
+    const messagePromise = waitForSocketMessage(socket);
+    socket.send(
+      `{"id":${androidStyleId},"jsonrpc":"2.0","method":"wc_proposeSession","params":{"pairingTopic":"topic","sessionProposal":"proposal"}}`
+    );
+
+    const raw = await messagePromise;
+    expect(raw).toContain(`"id":${androidStyleId}`);
+    expect(JSON.parse(raw)).toMatchObject({
+      jsonrpc: "2.0",
+      result: true,
+    });
+
+    socket.close();
+  });
 });
+
+function waitForSocketOpen(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+}
+
+function waitForSocketMessage(socket: WebSocket): Promise<string> {
+  return new Promise((resolve, reject) => {
+    socket.once("message", (data) => resolve(data.toString()));
+    socket.once("error", reject);
+  });
+}
