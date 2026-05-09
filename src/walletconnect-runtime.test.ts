@@ -119,6 +119,69 @@ describe("walletconnect harness runtime", () => {
 
     socket.close();
   });
+
+  it("delivers session approval on the subscribed pairing topic", async () => {
+    relay = await startLocalWalletConnectRelay(0);
+    const dapp = new WebSocket(relay.url);
+    const wallet = new WebSocket(relay.url);
+    await Promise.all([waitForSocketOpen(dapp), waitForSocketOpen(wallet)]);
+
+    const pairingTopic = "pairing-topic";
+    const subscribePromise = waitForSocketMessage(dapp);
+    dapp.send(
+      JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "irn_subscribe",
+        params: { topic: pairingTopic },
+      })
+    );
+    const subscriptionId = JSON.parse(await subscribePromise).result;
+
+    const proposePromise = waitForSocketMessage(dapp);
+    dapp.send(
+      JSON.stringify({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "wc_proposeSession",
+        params: {
+          pairingTopic,
+          sessionProposal: "proposal",
+        },
+      })
+    );
+    expect(JSON.parse(await proposePromise)).toMatchObject({ result: true });
+
+    const approvalPromise = waitForSocketMessage(dapp);
+    wallet.send(
+      JSON.stringify({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "wc_approveSession",
+        params: {
+          pairingTopic,
+          sessionProposalResponse: "approved",
+          sessionSettlementRequest: "settled",
+          sessionTopic: "session-topic",
+        },
+      })
+    );
+
+    const approval = JSON.parse(await approvalPromise);
+    expect(approval).toMatchObject({
+      method: "irn_subscription",
+      params: {
+        data: {
+          message: "approved",
+          topic: pairingTopic,
+        },
+        id: subscriptionId,
+      },
+    });
+
+    dapp.close();
+    wallet.close();
+  });
 });
 
 function waitForSocketOpen(socket: WebSocket): Promise<void> {

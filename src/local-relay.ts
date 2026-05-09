@@ -221,8 +221,16 @@ function handleCustomWalletConnectRequest(
     addVirtualSubscription(virtualSubscriptions, sessionTopic, socket);
     sendResult(socket, request, true);
 
+    storeRelayMessage(pairingTopic, pairingResponse, messages);
+    const pairingDeliveries = publishToSubscribers(
+      pairingTopic,
+      pairingResponse,
+      subscriptions,
+      new Map(),
+      socket
+    );
     const proposer = proposers.get(pairingTopic);
-    if (proposer) {
+    if (pairingDeliveries === 0 && proposer) {
       sendRelayMessage(
         { id: randomUUID(), socket: proposer, topic: pairingTopic },
         {
@@ -318,7 +326,8 @@ function publishToSubscribers(
   subscriptions: Map<string, RelaySubscription[]>,
   virtualSubscriptions: Map<string, Set<WebSocket>>,
   excludeSocket?: WebSocket
-): void {
+): number {
+  let deliveries = 0;
   debugRelay("publish", topic, {
     subscribers: subscriptions.get(topic)?.length ?? 0,
     virtualSubscribers: virtualSubscriptions.get(topic)?.size ?? 0,
@@ -326,6 +335,7 @@ function publishToSubscribers(
   for (const entry of subscriptions.get(topic) ?? []) {
     if (entry.socket === excludeSocket) continue;
     sendRelayMessage(entry, { message, publishedAt: Date.now(), topic });
+    deliveries += 1;
   }
   for (const socket of virtualSubscriptions.get(topic) ?? []) {
     if (socket === excludeSocket) continue;
@@ -333,7 +343,9 @@ function publishToSubscribers(
       { id: randomUUID(), socket, topic },
       { message, publishedAt: Date.now(), topic }
     );
+    deliveries += 1;
   }
+  return deliveries;
 }
 
 function sendRelayMessage(
